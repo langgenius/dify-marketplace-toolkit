@@ -7,7 +7,7 @@ def get_prefix(file_path):
 files = json.loads(os.environ['PR_FILES'])
 
 # only tools/ models/ extensions/ agent-strategies/
-files = [file for file in files if file['path'].startswith('tools/') or file['path'].startswith('models/') or file['path'].startswith('extensions/')]
+files = [file for file in files if file['path'].startswith('tools/') or file['path'].startswith('models/') or file['path'].startswith('extensions/') or file['path'].startswith('agent-strategies/')]
 
 previous_prefix = get_prefix(files[0]['path'])
 for file in files:
