@@ -49,7 +49,7 @@ def test_plugin_install(directory: str) -> str:
                     print("================================================")
                     print(''.join(error))
                     print("================================================")
-                    print("!!! Have you test it locally?")
+                    print("!!! Have you tested it locally?")
                     semaphore.release()
                     break
                 if output:
