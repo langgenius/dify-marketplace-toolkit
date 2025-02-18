@@ -44,7 +44,12 @@ def test_plugin_install(directory: str) -> str:
             while True:
                 output = process.stdout.readline()
                 if output == "" and process.poll() is not None:
-                    print("!!! Process exited")
+                    error = process.stderr.readlines()
+                    print("!!! Process exited, here is the stderr:")
+                    print("================================================")
+                    print(''.join(error))
+                    print("================================================")
+                    print("!!! Have you test it locally?")
                     semaphore.release()
                     break
                 if output:
