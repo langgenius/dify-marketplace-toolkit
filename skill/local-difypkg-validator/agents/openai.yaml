@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local DIFYPKG Validator"
+  short_description: "Validate local Dify plugin packages"
+  default_prompt: "Validate a local .difypkg package using the Marketplace validator checks described in SKILL.md"
