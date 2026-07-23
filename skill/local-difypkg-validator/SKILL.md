@@ -10,20 +10,26 @@ Use this skill when the user wants to validate a local `.difypkg` package withou
 ## Workflow
 
 1. Get the local `.difypkg` path from the user.
-2. Run the bundled validator CLI from this skill:
+2. Check prerequisites before running validation:
+   ```bash
+   command -v python3
+   command -v yq
+   ```
+   If `python3` is missing, ask the user before installing or direct them to install Python. If `yq` is missing, ask whether to install it with Homebrew (`brew install yq`) before continuing. Do not install dependencies silently.
+3. Run the bundled validator CLI from this skill:
    ```bash
    python3 validator/validate-difypkg.py /path/to/plugin.difypkg
    ```
-3. The wrapper script is also available for agent environments that prefer `scripts/` entrypoints:
+4. The wrapper script is also available for agent environments that prefer `scripts/` entrypoints:
    ```bash
    python3 scripts/validate_difypkg.py /path/to/plugin.difypkg
    ```
-4. By default, the skill uses its bundled `validator/` directory. To force use of an external toolkit checkout, pass:
+5. By default, the skill uses its bundled `validator/` directory. To force use of an external toolkit checkout, pass:
    ```bash
    python3 scripts/validate_difypkg.py /path/to/plugin.difypkg --toolkit-dir /path/to/dify-marketplace-toolkit
    ```
-5. Report the summary table and the report directory path.
-6. Treat exit code `0` as pass with possible warnings; exit code `1` means blocking errors or environment failures were found.
+6. Report the summary table and the report directory path.
+7. Treat exit code `0` as pass with possible warnings; exit code `1` means blocking errors or environment failures were found.
 
 ## Optional Inputs
 
@@ -33,7 +39,9 @@ Use this skill when the user wants to validate a local `.difypkg` package withou
 
 ## Prerequisites
 
-`python3` and `yq` must be available. The manifest validator uses `yq`; if it is missing, the manifest check is reported as a blocking environment failure.
+`python3` and `yq` must be available. The manifest validator uses `yq`.
+
+The bundled validator CLI checks for `yq` at startup. In an interactive terminal it prompts before running `brew install yq`; in non-interactive environments it prints the install command and exits with code `1`.
 
 ## Coverage
 

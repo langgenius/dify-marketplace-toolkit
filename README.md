@@ -28,8 +28,9 @@ python3 validator/validate-difypkg.py /path/to/plugin.difypkg \
 - `python3`
 - `yq`, used by the manifest validator
 
-If `yq` is missing, `manifest_metadata` fails as a blocking environment error
-instead of reporting real manifest findings.
+If `yq` is missing, the validator checks for it at startup. In an interactive
+terminal it asks before installing `yq` with Homebrew. In non-interactive
+environments it prints the install command and exits with code `1`.
 
 ### Validation goals
 

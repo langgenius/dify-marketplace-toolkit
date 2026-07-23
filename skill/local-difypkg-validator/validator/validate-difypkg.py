@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +12,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from shutil import which
 
 
 @dataclass
@@ -51,6 +51,34 @@ def run_cmd(cmd: list[str], *, cwd: Path | None = None, timeout: int | None = No
     if result.stderr:
         print(result.stderr.rstrip(), file=sys.stderr)
     return result
+
+
+def confirm(prompt: str) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    answer = input(prompt).strip().lower()
+    return answer in {"y", "yes"}
+
+
+def ensure_yq() -> bool:
+    if which("yq"):
+        return True
+
+    print("Missing required dependency: yq", file=sys.stderr)
+    print("The manifest validator uses yq to parse manifest.yaml.", file=sys.stderr)
+    if not which("brew"):
+        print("Install yq and rerun validation, for example: brew install yq", file=sys.stderr)
+        return False
+
+    if not confirm("Install yq with Homebrew now? [y/N] "):
+        print("Install yq and rerun validation, for example: brew install yq", file=sys.stderr)
+        return False
+
+    result = run_cmd(["brew", "install", "yq"], timeout=600)
+    if result.returncode != 0:
+        print("Failed to install yq with Homebrew. Install it manually and rerun validation.", file=sys.stderr)
+        return False
+    return which("yq") is not None
 
 
 def read_lines(path: Path) -> list[str]:
@@ -253,6 +281,9 @@ def main() -> int:
         return 1
     if package_path.suffix != ".difypkg":
         print(f"ERROR: expected a .difypkg file: {package_path}", file=sys.stderr)
+        return 1
+
+    if not ensure_yq():
         return 1
 
     try:
