@@ -269,6 +269,11 @@ def main() -> int:
     parser.add_argument("--output-dir", help="Directory where reports should be written")
     parser.add_argument("--pr-body-file", help="Optional PR body file for sensitive capability disclosure checks")
     parser.add_argument("--keep-temp", action="store_true", help="Keep unpacked package temp directory")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip checks that query external services (dependency vulnerability lookup)",
+    )
     args = parser.parse_args()
 
     package_path = Path(args.package).expanduser().resolve()
@@ -333,10 +338,16 @@ def main() -> int:
         results.append(run_compile_check(unpacked_dir, report_dir))
 
         warning_validators = [
-            ("python_safety", "check-python-safety-warnings.py"),
-            ("prohibited_financial_activity", "check-prohibited-financial-activity.py"),
+            ("python_safety", "check-python-safety-warnings.py", []),
+            ("prohibited_financial_activity", "check-prohibited-financial-activity.py", []),
+            ("access_domains", "check-access-domains.py", []),
+            (
+                "dependency_vulnerabilities",
+                "check-dependency-vulnerabilities.py",
+                ["--offline"] if args.offline else [],
+            ),
         ]
-        for name, script_name in warning_validators:
+        for name, script_name, extra_args in warning_validators:
             results.append(
                 run_validator(
                     name=name,
@@ -345,6 +356,7 @@ def main() -> int:
                     unpacked_dir=unpacked_dir,
                     report_dir=report_dir,
                     blocking=False,
+                    extra_args=extra_args,
                 )
             )
 

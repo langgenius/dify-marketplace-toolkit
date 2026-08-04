@@ -92,7 +92,7 @@ def write_lines(path: Path, lines: Iterable[str]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def find_validator_root(explicit: str | None) -> Path:
+def find_toolkit_dir(explicit: str | None) -> Path:
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit).expanduser())
@@ -106,15 +106,11 @@ def find_validator_root(explicit: str | None) -> Path:
 
     for candidate in candidates:
         resolved = candidate.resolve()
-        if (
-            (resolved / "validator" / "check-package-contents.py").is_file()
-            and (resolved / "validator" / "check-package-secrets.py").is_file()
-            and (resolved / "validator" / "check-manifest-metadata.py").is_file()
-        ):
+        if (resolved / "validator").is_dir() and (resolved / "uploader").is_dir():
             return resolved
 
     raise RuntimeError(
-        "Unable to locate bundled validators. Pass --toolkit-dir or set DIFY_MARKETPLACE_TOOLKIT_DIR."
+        "Unable to locate dify-marketplace-toolkit. Pass --toolkit-dir or set DIFY_MARKETPLACE_TOOLKIT_DIR."
     )
 
 
@@ -273,6 +269,11 @@ def main() -> int:
     parser.add_argument("--output-dir", help="Directory where reports should be written")
     parser.add_argument("--pr-body-file", help="Optional PR body file for sensitive capability disclosure checks")
     parser.add_argument("--keep-temp", action="store_true", help="Keep unpacked package temp directory")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip checks that query external services (dependency vulnerability lookup)",
+    )
     args = parser.parse_args()
 
     package_path = Path(args.package).expanduser().resolve()
@@ -287,7 +288,7 @@ def main() -> int:
         return 1
 
     try:
-        toolkit_dir = find_validator_root(args.toolkit_dir)
+        toolkit_dir = find_toolkit_dir(args.toolkit_dir)
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -337,10 +338,16 @@ def main() -> int:
         results.append(run_compile_check(unpacked_dir, report_dir))
 
         warning_validators = [
-            ("python_safety", "check-python-safety-warnings.py"),
-            ("prohibited_financial_activity", "check-prohibited-financial-activity.py"),
+            ("python_safety", "check-python-safety-warnings.py", []),
+            ("prohibited_financial_activity", "check-prohibited-financial-activity.py", []),
+            ("access_domains", "check-access-domains.py", []),
+            (
+                "dependency_vulnerabilities",
+                "check-dependency-vulnerabilities.py",
+                ["--offline"] if args.offline else [],
+            ),
         ]
-        for name, script_name in warning_validators:
+        for name, script_name, extra_args in warning_validators:
             results.append(
                 run_validator(
                     name=name,
@@ -349,6 +356,7 @@ def main() -> int:
                     unpacked_dir=unpacked_dir,
                     report_dir=report_dir,
                     blocking=False,
+                    extra_args=extra_args,
                 )
             )
 

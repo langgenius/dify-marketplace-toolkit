@@ -1,6 +1,6 @@
 ---
 name: local-difypkg-validator
-description: Validate a local Dify .difypkg file with bundled Marketplace package validators. Use when a user wants to check a downloaded or locally built plugin package before submitting a PR, including package contents, secrets, binaries, manifest/privacy, README, dependencies, Python safety warnings, and financial-activity review signals.
+description: Validate a local Dify .difypkg file with bundled Marketplace package validators. Use when a user wants to check a downloaded or locally built plugin package before submitting a PR, including package contents, secrets, binaries, manifest/privacy, README, dependencies, outbound access domains, dependency vulnerabilities, Python safety warnings, and financial-activity review signals.
 ---
 
 # Local DIFYPKG Validator
@@ -36,6 +36,7 @@ Use this skill when the user wants to validate a local `.difypkg` package withou
 - `--pr-body-file <path>`: run sensitive capability disclosure checks that need PR body text.
 - `--keep-temp`: keep the unpacked package and reports in the temp directory.
 - `--output-dir <path>`: write reports to a stable directory.
+- `--offline`: skip the dependency vulnerability lookup.
 
 ## Prerequisites
 
@@ -57,6 +58,10 @@ Default local validation covers checks that can be evaluated from the `.difypkg`
 - Python compile check
 - Python safety warnings
 - prohibited financial activity review warnings
+- outbound access domains vs. the optional `network.domains` manifest node
+- dependency vulnerabilities looked up in the OSV database
+
+The dependency vulnerability check is the only one that reaches the network. Pass `--offline` to skip it; the run then reports the dependency set without a verdict rather than reporting a clean one.
 
 The skill is self-contained for local package checks: copying or installing the `local-difypkg-validator` folder includes the validator scripts it calls. It does not submit GitHub reviews and does not run PR-only checks unless the required local input is provided. PR title/body language, PR template completeness, and Marketplace duplicate-version checks remain PR/CI workflow responsibilities.
 

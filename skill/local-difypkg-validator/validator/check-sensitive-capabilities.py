@@ -1,8 +1,29 @@
+"""Check that a PR discloses the sensitive capabilities its plugin uses.
+
+The detection rules live in ``plugin_scan`` so that the uploader reports the
+same numbers this gate enforces. Three behaviours changed when they moved
+there, all of which used to distort the counts:
+
+* a line is attributed to every category it matches, not only the first in
+  declaration order — ``requests.delete(url)`` was previously filed under
+  "SQL or database access" and its network signal was lost;
+* the per-category limit caps stored samples rather than counting, so a large
+  plugin no longer silently reports a truncated total;
+* SQL and code-execution rules run against code files only. A YAML parameter
+  declared ``type: select`` used to read as a SELECT statement, which put the
+  "SQL or database access" hit rate at 67% against a true 5.4%.
+"""
+
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
+
+from plugin_scan import scan_capabilities
+
+
+def format_finding(category: str, sample: str) -> str:
+    return f"{category}: {sample}"
 
 
 SENSITIVE_SECTION_RE = re.compile(
@@ -13,84 +34,7 @@ NEXT_SECTION_RE = re.compile(r"^##\s+", re.MULTILINE)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 NONE_NOTES_RE = re.compile(r"^(none|n/a|na|not applicable|no|nothing)\.?$", re.IGNORECASE)
 
-SCAN_SUFFIXES = {
-    ".py",
-    ".yaml",
-    ".yml",
-    ".json",
-    ".toml",
-    ".js",
-    ".ts",
-}
 
-SKIP_DIR_NAMES = {
-    ".git",
-    ".hg",
-    ".svn",
-    ".venv",
-    "venv",
-    "env",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".mypy_cache",
-    ".tox",
-    ".nox",
-    "node_modules",
-}
-
-MAX_FILE_BYTES = 1024 * 1024
-MAX_MATCHES_PER_CATEGORY = 20
-
-CAPABILITY_PATTERNS = {
-    "command execution": (
-        r"\bsubprocess\.(?:run|Popen|call|check_call|check_output)\s*\(",
-        r"\bos\.(?:system|popen|spawn[a-z_]*|exec[a-z_]*)\s*\(",
-        r"\bpty\.spawn\s*\(",
-    ),
-    "code execution": (
-        r"\beval\s*\(",
-        r"\bexec\s*\(",
-        r"\bcompile\s*\(",
-        r"\bimportlib\.import_module\s*\(",
-        r"\b__import__\s*\(",
-        r"\bpickle\.loads?\s*\(",
-        r"\bmarshal\.loads?\s*\(",
-    ),
-    "SQL or database access": (
-        r"\b(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE\s+TABLE)\b",
-        r"\b(?:sqlite3|psycopg|psycopg2|pymysql|mysql\.connector|sqlalchemy)\b",
-        r"\.execute(?:many)?\s*\(",
-    ),
-    "SSH or SFTP": (
-        r"\b(?:paramiko|fabric|asyncssh|scp|sftp)\b",
-        r"\bSSHClient\s*\(",
-    ),
-    "filesystem operations": (
-        r"\bopen\s*\(",
-        r"\bPath\s*\(",
-        r"\bos\.(?:remove|unlink|rename|replace|makedirs|listdir|walk)\s*\(",
-        r"\bshutil\.(?:copy|copyfile|copytree|move|rmtree)\s*\(",
-        r"\bglob\.glob\s*\(",
-    ),
-    "arbitrary network requests": (
-        r"\brequests\.(?:get|post|put|patch|delete|request)\s*\(",
-        r"\bhttpx\.(?:get|post|put|patch|delete|request)\s*\(",
-        r"\baiohttp\.ClientSession\s*\(",
-        r"\burllib\.request\.(?:urlopen|Request)\s*\(",
-        r"\burlopen\s*\(",
-    ),
-    "browser automation": (
-        r"\b(?:playwright|selenium|pyppeteer|webdriver)\b",
-        r"\bbrowser\.new_page\s*\(",
-        r"\bpage\.goto\s*\(",
-    ),
-}
-
-COMPILED_PATTERNS = {
-    category: tuple(re.compile(pattern, re.IGNORECASE) for pattern in patterns)
-    for category, patterns in CAPABILITY_PATTERNS.items()
-}
 
 
 def strip_template_comments(value: str) -> str:
@@ -113,55 +57,22 @@ def is_none_notes(notes: str) -> bool:
     return bool(NONE_NOTES_RE.fullmatch(normalized))
 
 
-def relative_path(path: Path, base: Path) -> str:
-    return path.relative_to(base).as_posix()
+def collect_findings(directory: Path) -> list[str]:
+    """Flatten the structured scan into the one-finding-per-line report format.
 
-
-def should_scan_file(path: Path) -> bool:
-    if path.suffix.lower() not in SCAN_SUFFIXES:
-        return False
-    if path.name in {"requirements.txt", "pyproject.toml"}:
-        return False
-    try:
-        return path.stat().st_size <= MAX_FILE_BYTES
-    except OSError:
-        return False
-
-
-def scan_capabilities(directory: Path) -> list[str]:
+    A category whose sample list was capped still shows its true total, so a
+    reviewer can tell "20 call sites" from "20 shown, more not listed".
+    """
     findings: list[str] = []
-    match_counts = {category: 0 for category in COMPILED_PATTERNS}
-
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = [dirname for dirname in dirs if dirname not in SKIP_DIR_NAMES]
-        root_path = Path(root)
-
-        for filename in files:
-            path = root_path / filename
-            if not should_scan_file(path):
-                continue
-
-            try:
-                lines = path.read_text(encoding="utf-8").splitlines()
-            except UnicodeDecodeError:
-                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-
-            for line_number, line in enumerate(lines, start=1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-
-                for category, patterns in COMPILED_PATTERNS.items():
-                    if match_counts[category] >= MAX_MATCHES_PER_CATEGORY:
-                        continue
-                    if any(pattern.search(stripped) for pattern in patterns):
-                        snippet = stripped[:180]
-                        findings.append(
-                            f"{category}: {relative_path(path, directory)}:{line_number}: {snippet}"
-                        )
-                        match_counts[category] += 1
-                        break
-
+    for category in scan_capabilities(directory):
+        for sample in category.samples:
+            findings.append(format_finding(category.name, sample))
+        hidden = category.count - len(category.samples)
+        if hidden > 0:
+            findings.append(
+                f"{category.name}: {hidden} further match(es) not listed "
+                f"({category.count} total)"
+            )
     return findings
 
 
@@ -175,7 +86,7 @@ def validate_sensitive_capabilities(directory: Path, pr_body_path: Path) -> tupl
         pr_body = pr_body_path.read_text(encoding="utf-8", errors="ignore")
 
     notes, section_found = extract_security_notes(pr_body)
-    findings = scan_capabilities(directory)
+    findings = collect_findings(directory)
 
     if not section_found:
         errors.append("PR body is missing the 'Security and privacy notes' section")
