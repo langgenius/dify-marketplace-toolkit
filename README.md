@@ -85,12 +85,46 @@ want to keep the unpacked package directory for debugging.
 
 ### Tests
 
-The scanner shared by the validators and the uploader has offline regression
-tests:
-
 ```bash
-python3 -m unittest discover -s validator -p 'test_*.py'
+make test     # offline unit tests
+make check    # what CI runs: tests, stub wiring, skill sync
 ```
+
+## Repository layout
+
+```text
+toolkit/            importable core -- no argparse, no sys.exit, unit-tested
+  findings.py         the value every check returns
+  cli.py              the one CLI shell all check scripts share
+  registry.py         what the local validator runs, in what order
+  walk.py  osv.py     shared file walk; OSV vulnerability client
+  scan/               extracts facts: hosts, deps, capabilities, report
+  checks/             turns those facts into errors and warnings
+validator/          the CLI surface
+  validate-difypkg.py   main entry point
+  bin/                  one six-line adapter per check
+uploader/           publishing entry point, called by both plugin repositories
+tools/sync-skill.py regenerates the bundled skill copy
+```
+
+Two rules keep this stable:
+
+**Paths other repositories call are frozen.** `validator/check-pkg-paths.py`,
+`validator/test-plugin-install.py` and `uploader/upload-package.py` are
+hardcoded in `dify-plugins` and `dify-official-plugins` workflows, which clone
+this repository at `HEAD` with no pinned SHA. Moving one breaks every open
+plugin PR in both repositories the moment it merges. They stay at the top level
+for that reason; everything behind them is free to move.
+
+**Category and severity live in `registry.py`, not in directory names.** A check
+can be promoted from warning to blocking without a file move.
+
+### Adding a check
+
+1. Write `toolkit/checks/<name>.py` exposing `scan(args) -> Findings`.
+2. Add a six-line adapter under `validator/bin/`, copying any existing one.
+3. Add a row to `CHECKS` in `toolkit/registry.py`.
+4. `make check`.
 
 ## Security report attached to uploads
 

@@ -25,10 +25,11 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "validator"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import osv_client  # noqa: E402
-import plugin_scan  # noqa: E402
+from toolkit import osv  # noqa: E402
+from toolkit.scan import report as security_scan  # noqa: E402
+from toolkit.walk import unpack_package  # noqa: E402
 
 MARKETPLACE_BASE_URL = ""
 PLUGIN_DAEMON_PATH = "./dify-plugin"
@@ -104,17 +105,17 @@ def build_security_report(package: str) -> str:
         workdir = tempfile.mkdtemp(prefix="plugin-security-scan-")
         unpacked = Path(workdir) / "unpacked"
         unpacked.mkdir(parents=True, exist_ok=True)
-        plugin_scan.unpack_package(Path(package), unpacked)
-        report = plugin_scan.build_security_report(
+        unpack_package(Path(package), unpacked)
+        report = security_scan.build_security_report(
             unpacked,
             scanned_at=datetime.datetime.now(datetime.timezone.utc)
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z"),
-            vulnerability_lookup=osv_client.make_lookup(enabled=SCAN_VULNERABILITIES),
+            vulnerability_lookup=osv.make_lookup(enabled=SCAN_VULNERABILITIES),
         )
         print(f"Security scan: {summarize_report(report)}")
-        return plugin_scan.dumps_report(report)
+        return security_scan.dumps_report(report)
     except Exception:
         print("Security scan failed; uploading without a security report")
         print(traceback.format_exc())

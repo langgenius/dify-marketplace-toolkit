@@ -1,0 +1,50 @@
+name: CI
+
+# This repository had no CI of its own, while two plugin repositories clone it at
+# HEAD with no pinned SHA -- a bad commit here reaches every open plugin PR in
+# both of them immediately. These three gates are the minimum that makes that
+# arrangement safe.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the interpreter both plugin repositories run the toolkit on.
+          python-version: '3.12'
+
+      - name: Unit tests
+        run: python3 -m unittest discover -t . -s tests
+
+      - name: Check stubs load
+        run: |
+          for stub in validator/bin/check-*.py; do
+            python3 "$stub" --help > /dev/null || { echo "FAILED: $stub"; exit 1; }
+          done
+          echo "all check stubs load"
+
+      # The skill ships a copy of the validator. Editing one tree and not the
+      # other used to ship a stale skill silently.
+      - name: Skill copy is in sync
+        run: python3 tools/sync-skill.py --check
+
+      # These three paths are hardcoded in dify-plugins and dify-official-plugins
+      # workflows. Moving one breaks every open plugin PR in both repositories.
+      - name: Public CLI paths still exist
+        run: |
+          set -e
+          test -f validator/check-pkg-paths.py
+          test -f validator/test-plugin-install.py
+          test -f uploader/upload-package.py
+          echo "public CLI paths intact"
