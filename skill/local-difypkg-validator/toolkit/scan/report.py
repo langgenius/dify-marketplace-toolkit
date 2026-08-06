@@ -26,12 +26,19 @@ def build_security_report(
     *,
     scanned_at: str,
     vulnerability_lookup=None,
+    version_resolver=None,
 ) -> dict:
     """Produce the ``security_report`` payload for one unpacked plugin.
 
     ``vulnerability_lookup`` takes the resolved dependency list and returns
     ``(vulnerabilities, status)``. It is injected so the scan works offline and
     so the network half can be tested without one.
+
+    ``version_resolver`` takes the unresolved dependency list and returns
+    ``(resolved, still_unresolved)`` — see :func:`toolkit.scan.pypi.resolve_ranges`.
+    It runs after dependency collection and before the vulnerability lookup, so
+    an inferred version is checked against the database like a pinned one.
+    Injected for the same reason as the lookup.
 
     Each section carries its own status. A dependency lookup that could not
     reach the database must not make the domain scan look absent — "we did not
@@ -58,6 +65,13 @@ def build_security_report(
 
     try:
         dependency_scan = collect_dependencies(directory)
+        if version_resolver is not None and dependency_scan.unresolved:
+            inferred, still_unresolved = version_resolver(dependency_scan.unresolved)
+            dependency_scan.resolved = sorted(
+                dependency_scan.resolved + inferred,
+                key=lambda item: (item["name"], item["version"]),
+            )
+            dependency_scan.unresolved = still_unresolved
         dependencies = dependency_scan.to_json()
         dependencies["database"] = "osv.dev"
         if not dependency_scan.resolved and not dependency_scan.unresolved:

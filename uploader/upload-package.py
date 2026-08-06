@@ -28,6 +28,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from toolkit import osv  # noqa: E402
+from toolkit.scan import pypi  # noqa: E402
 from toolkit.scan import report as security_scan  # noqa: E402
 from toolkit.walk import unpack_package  # noqa: E402
 
@@ -113,6 +114,11 @@ def build_security_report(package: str) -> str:
             .isoformat()
             .replace("+00:00", "Z"),
             vulnerability_lookup=osv.make_lookup(enabled=SCAN_VULNERABILITIES),
+            # Range inference queries PyPI, so it obeys the same switch as the
+            # vulnerability lookup: --no-vuln-scan keeps the scan fully offline,
+            # while --test still resolves and queries — that run is exactly
+            # where an author first sees what the plugin page will say.
+            version_resolver=pypi.make_resolver(enabled=SCAN_VULNERABILITIES),
         )
         print(f"Security scan: {summarize_report(report)}")
         return security_scan.dumps_report(report)

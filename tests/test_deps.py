@@ -29,7 +29,9 @@ class DependencyCollectionTest(unittest.TestCase):
         files = {"requirements.txt": "requests==2.31.0\nhttpx>=0.27\n# comment\n"}
         scan = deps.collect_dependencies(write_plugin(files))
         self.assertEqual(scan.source, "requirements.txt")
-        self.assertEqual(scan.resolved, [{"name": "requests", "version": "2.31.0"}])
+        self.assertEqual(
+            scan.resolved, [{"name": "requests", "version": "2.31.0", "basis": "locked"}]
+        )
         self.assertEqual(scan.unresolved, [{"name": "httpx", "specifier": ">=0.27"}])
 
     def test_uv_lock_wins_over_requirements(self):
@@ -44,7 +46,9 @@ class DependencyCollectionTest(unittest.TestCase):
         }
         scan = deps.collect_dependencies(write_plugin(files))
         self.assertEqual(scan.source, "uv.lock")
-        self.assertEqual(scan.resolved, [{"name": "requests", "version": "2.32.3"}])
+        self.assertEqual(
+            scan.resolved, [{"name": "requests", "version": "2.32.3", "basis": "locked"}]
+        )
 
     def test_no_dependency_manifest_is_empty_not_an_error(self):
         scan = deps.collect_dependencies(write_plugin({"main.py": "x = 1\n"}))

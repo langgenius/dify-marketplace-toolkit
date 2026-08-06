@@ -5,6 +5,11 @@ closure, ``requirements.txt`` is usually pinned, ``pyproject.toml`` is mostly
 ranges. What cannot be pinned is kept in ``unresolved`` rather than dropped,
 because "we could not check this one" is a different answer from "this one is
 clean" and the vulnerability lookup must not blur them.
+
+Every resolved entry carries a ``basis`` telling downstream how the version
+was obtained: ``locked`` means it came from a lockfile or an exact ``==`` pin
+in a manifest. Range constraints resolved against the index at scan time are
+added later by :mod:`toolkit.scan.pypi` with ``basis="range_inferred"``.
 """
 
 from __future__ import annotations
@@ -68,7 +73,11 @@ def _parse_requirements(path: Path, base: Path, seen: set[Path]) -> DependencySc
         pinned = REQUIREMENT_PIN_RE.match(line)
         if pinned:
             scan.resolved.append(
-                {"name": normalise_package_name(pinned.group(1)), "version": pinned.group(2)}
+                {
+                    "name": normalise_package_name(pinned.group(1)),
+                    "version": pinned.group(2),
+                    "basis": "locked",
+                }
             )
             continue
         named = REQUIREMENT_NAME_RE.match(line)
@@ -104,7 +113,11 @@ def _parse_uv_lock(path: Path) -> DependencyScan:
             version = package.get("version")
             if name and version:
                 scan.resolved.append(
-                    {"name": normalise_package_name(str(name)), "version": str(version)}
+                    {
+                        "name": normalise_package_name(str(name)),
+                        "version": str(version),
+                        "basis": "locked",
+                    }
                 )
         return scan
 
@@ -129,7 +142,11 @@ def _parse_uv_lock(path: Path) -> DependencyScan:
         version_match = UV_LOCK_VERSION_RE.match(line)
         if version_match and name:
             scan.resolved.append(
-                {"name": normalise_package_name(name), "version": version_match.group(1)}
+                {
+                    "name": normalise_package_name(name),
+                    "version": version_match.group(1),
+                    "basis": "locked",
+                }
             )
             name = None
     return scan
@@ -152,7 +169,11 @@ def _parse_pyproject(path: Path) -> DependencyScan:
         pinned = REQUIREMENT_PIN_RE.match(str(requirement))
         if pinned:
             scan.resolved.append(
-                {"name": normalise_package_name(pinned.group(1)), "version": pinned.group(2)}
+                {
+                    "name": normalise_package_name(pinned.group(1)),
+                    "version": pinned.group(2),
+                    "basis": "locked",
+                }
             )
             continue
         named = REQUIREMENT_NAME_RE.match(str(requirement))
