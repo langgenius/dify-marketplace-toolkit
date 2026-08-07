@@ -1,4 +1,4 @@
-.PHONY: help test check sync-skill validate
+.PHONY: help test stubs check sync-skill validate
 
 PYTHON ?= python3
 
@@ -16,7 +16,7 @@ test:
 # that no two flags collide. A broken stub is otherwise invisible until CI runs it
 # against a real package. check-pkg-paths and check-prefix predate run_check
 # and read PR context instead of taking --help, so they sit outside the probe.
-check: test
+stubs:
 	@for stub in validator/check-*.py; do \
 		case "$$stub" in \
 			validator/check-pkg-paths.py|validator/check-prefix.py) continue;; \
@@ -24,6 +24,8 @@ check: test
 		$(PYTHON) $$stub --help > /dev/null || { echo "FAILED: $$stub"; exit 1; }; \
 	done
 	@echo "all check stubs load"
+
+check: test stubs
 	$(PYTHON) tools/sync-skill.py --check
 
 sync-skill:
