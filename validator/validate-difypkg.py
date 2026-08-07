@@ -121,7 +121,7 @@ def find_toolkit_dir(explicit: str | None) -> Path:
     # and only ever worked from inside a full checkout.
     for candidate in candidates:
         resolved = candidate.resolve()
-        if (resolved / "validator" / "bin").is_dir() and (resolved / "toolkit").is_dir():
+        if (resolved / "validator" / "validate-difypkg.py").is_file() and (resolved / "toolkit").is_dir():
             return resolved
 
     raise RuntimeError(
@@ -137,7 +137,7 @@ def run_script_check(
     unpacked_dir: Path,
     report_dir: Path,
 ) -> CheckResult:
-    script_path = toolkit_dir / "validator" / "bin" / check.script
+    script_path = toolkit_dir / "validator" / check.script
     error_file = report_dir / f"{check.name}.errors.txt"
     warning_file = report_dir / f"{check.name}.warnings.txt"
 

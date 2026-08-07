@@ -102,7 +102,7 @@ toolkit/            importable core -- no argparse, no sys.exit, unit-tested
   checks/             turns those facts into errors and warnings
 validator/          the CLI surface
   validate-difypkg.py   main entry point
-  bin/                  one six-line adapter per check
+  check-*.py            one six-line adapter per check -- paths other repos call
 uploader/           publishing pipeline -- run it: python3 .scripts/uploader
   __main__.py         entry point
   cli.py              argparse and the upload -> scan report flow
@@ -129,7 +129,7 @@ can be promoted from warning to blocking without a file move.
 ### Adding a check
 
 1. Write `toolkit/checks/<name>.py` exposing `scan(args) -> Findings`.
-2. Add a six-line adapter under `validator/bin/`, copying any existing one.
+2. Add a six-line adapter `validator/check-<name>.py`, copying any existing one.
 3. Add a row to `CHECKS` in `toolkit/registry.py`.
 4. `make check`.
 

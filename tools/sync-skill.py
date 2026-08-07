@@ -23,10 +23,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = REPO_ROOT / "skill" / "local-difypkg-validator"
 
+sys.path.insert(0, str(REPO_ROOT))
+
+from toolkit.registry import CHECKS  # noqa: E402
+
 # What the skill needs to run `validate-difypkg.py` standalone. The uploader is
 # deliberately absent: the skill validates a package, it never publishes one.
-MIRRORED_TREES = ("toolkit", "validator/bin")
-MIRRORED_FILES = ("validator/validate-difypkg.py",)
+# The check stubs come from the registry, so a new check cannot be forgotten
+# here — the same table that runs it also ships it.
+MIRRORED_TREES = ("toolkit",)
+MIRRORED_FILES = (
+    "validator/validate-difypkg.py",
+    *sorted({f"validator/{check.script}" for check in CHECKS if check.script}),
+)
 
 IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
 
@@ -55,12 +64,16 @@ def sync() -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / name, target)
 
-    # Anything the skill still carries from before a rename is now unreachable
-    # and would only confuse the next reader.
-    for stale in sorted((SKILL_ROOT / "validator").glob("*.py")):
-        if stale.name != "validate-difypkg.py":
+    # Anything the skill still carries from before a rename or a layout move
+    # is now unreachable and would only confuse the next reader.
+    mirrored = {SKILL_ROOT / name for name in MIRRORED_FILES}
+    for stale in sorted((SKILL_ROOT / "validator").rglob("*")):
+        if stale.is_file() and stale not in mirrored:
             stale.unlink()
             print(f"removed stale {stale.relative_to(REPO_ROOT)}")
+    for leftover in sorted((SKILL_ROOT / "validator").rglob("*"), reverse=True):
+        if leftover.is_dir() and not any(leftover.iterdir()):
+            leftover.rmdir()
 
     print(f"synced {len(mirrored_paths())} file(s) into {SKILL_ROOT.relative_to(REPO_ROOT)}")
     return 0
@@ -77,7 +90,7 @@ def check() -> int:
             drifted.append(f"differs from source: {relative}")
 
     expected = {SKILL_ROOT / relative for relative in mirrored_paths()}
-    for tree in MIRRORED_TREES:
+    for tree in (*MIRRORED_TREES, "validator"):
         root = SKILL_ROOT / tree
         if not root.is_dir():
             continue

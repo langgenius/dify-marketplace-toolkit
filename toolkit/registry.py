@@ -41,7 +41,7 @@ class Check:
     """One row of the local validation run.
 
     ``name`` is the report-file prefix and the identifier in the summary table.
-    ``script`` is resolved under ``validator/bin/``. ``requires`` names a
+    ``script`` is resolved under ``validator/``. ``requires`` names a
     :class:`Context` attribute that must be set for the check to run at all;
     when it is missing the check is skipped and ``skip_reason`` is what the
     report says about it, so the explanation cannot drift from the condition.
