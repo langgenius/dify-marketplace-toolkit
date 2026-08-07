@@ -42,7 +42,7 @@ def main():
     group.add_argument("-p", "--package", type=str, help="The package to upload")
     group.add_argument("-d", "--directory", type=str, help="The directory to package and upload")
     group.add_argument("--batch-directory", type=str, help="Batch upload all directories in the given directory")
-    parser.add_argument("-t", "--token", type=str, required=True, help="The token to use for authentication")
+    parser.add_argument("-t", "--token", type=str, help="The token to use for authentication; not needed with --test, which never talks to the Marketplace")
     parser.add_argument("-u", "--base-url", type=str, help="The base url to use for the request")
     parser.add_argument("-f", "--force", action="store_true", help="Force upload the package, ignore version check")
     parser.add_argument("--with-changelog", action="store_true", help="Whether to read changelog from stdin")
@@ -55,6 +55,9 @@ def main():
     )
     args = parser.parse_args()
 
+    if not args.test and not args.token:
+        parser.error("-t/--token is required unless --test is given")
+
     # if --with-changelog == true, read changelog from stdin
     if args.with_changelog:
         changelog = sys.stdin.read()
@@ -65,7 +68,7 @@ def main():
     print(json.dumps(args.__dict__, indent=2))
 
     options = Options(
-        token=args.token,
+        token=args.token or "",
         base_url=args.base_url or "",
         force=args.force,
         changelog=args.changelog,

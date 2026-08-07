@@ -224,6 +224,18 @@ class UploaderTransportTest(unittest.TestCase):
         self.assertTrue(options.force)
         self.assertEqual(options.base_url, "https://mp")
 
+    def test_token_is_optional_only_in_test_mode(self):
+        """A pre-check never talks to the Marketplace, so it must not need a
+        secret; a real publish without one must fail at parse time."""
+        with mock.patch.object(cli, "publish_package", lambda pkg, opts: None):
+            with mock.patch.object(sys, "argv", ["uploader", "-p", self.package, "--test"]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cli.main()  # must not require -t
+        with mock.patch.object(sys, "argv", ["uploader", "-p", self.package]):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    cli.main()
+
     def test_entry_points_wire_the_cli(self):
         """`python3 .scripts/uploader` is the canonical invocation; the old
         `upload-package.py` path stays as an alias until both plugin
