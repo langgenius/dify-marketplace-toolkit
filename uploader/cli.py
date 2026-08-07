@@ -75,16 +75,16 @@ def main():
     )
 
     if args.package:
-        upload_package(args.package, options)
+        publish_package(args.package, options)
     elif args.directory:
-        upload_directory(args.directory, options)
+        publish_directory(args.directory, options)
     elif args.batch_directory:
-        batch_upload_directory(args.batch_directory, options)
+        batch_publish_directory(args.batch_directory, options)
     else:
         print("No package or directory provided")
 
 
-def upload_package(package: str, options: Options):
+def publish_package(package: str, options: Options):
     if options.testing:
         # A pre-check run is where an author first sees what the plugin page
         # will say, so the scan still runs — there is just nothing published
@@ -97,7 +97,7 @@ def upload_package(package: str, options: Options):
     scan_report.submit(package, checksum, options.token, options.base_url, options.scan_vulnerabilities)
 
 
-def upload_directory(directory: str, options: Options):
+def publish_directory(directory: str, options: Options):
     check_plugin_daemon_command_exists(options.plugin_daemon_path)
 
     # delete temp.difypkg if exists
@@ -111,17 +111,17 @@ def upload_directory(directory: str, options: Options):
     if result.returncode != 0:
         raise Exception("Failed to package the directory")
 
-    upload_package("temp.difypkg", options)
+    publish_package("temp.difypkg", options)
 
 
-def batch_upload_directory(directory: str, options: Options):
+def batch_publish_directory(directory: str, options: Options):
     success_dirs = []
     failed_dirs = []
     for dir in os.listdir(directory):
         path = os.path.join(directory, dir)
         print(f"* Uploading directory: {path}")
         try:
-            upload_directory(path, options)
+            publish_directory(path, options)
             success_dirs.append(path)
         except Exception:
             print(f"** Failed to upload directory: {path}")

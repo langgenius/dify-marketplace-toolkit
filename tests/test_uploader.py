@@ -122,7 +122,7 @@ class UploaderTransportTest(unittest.TestCase):
     def publish(self, **overrides):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            cli.upload_package(self.package, self.options(**overrides))
+            cli.publish_package(self.package, self.options(**overrides))
         return out.getvalue()
 
     def puts(self):
@@ -198,7 +198,7 @@ class UploaderTransportTest(unittest.TestCase):
         FAKE.post_queue = [FakeResponse(status_code=500, body={"code": -1})]
         with contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(Exception):
-                cli.upload_package(self.package, self.options())
+                cli.publish_package(self.package, self.options())
         self.assertEqual(self.puts(), [])
 
     def test_testing_mode_only_scans(self):
@@ -213,7 +213,7 @@ class UploaderTransportTest(unittest.TestCase):
         """The workflow-facing flags stay wired to the behaviour they name."""
         captured = {}
         argv = ["uploader", "-p", self.package, "-t", "tok", "-u", "https://mp", "-f", "--test", "--no-vuln-scan"]
-        with mock.patch.object(cli, "upload_package", lambda pkg, opts: captured.update(package=pkg, options=opts)):
+        with mock.patch.object(cli, "publish_package", lambda pkg, opts: captured.update(package=pkg, options=opts)):
             with mock.patch.object(sys, "argv", argv):
                 with contextlib.redirect_stdout(io.StringIO()):
                     cli.main()
