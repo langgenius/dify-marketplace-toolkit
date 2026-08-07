@@ -103,7 +103,11 @@ toolkit/            importable core -- no argparse, no sys.exit, unit-tested
 validator/          the CLI surface
   validate-difypkg.py   main entry point
   bin/                  one six-line adapter per check
-uploader/           publishing entry point, called by both plugin repositories
+uploader/           publishing pipeline, called by both plugin repositories
+  upload-package.py   frozen workflow entry point -- a stub over cli.py
+  cli.py              argparse and the upload -> scan report flow
+  package_upload.py   POST inner-upload; failures raise
+  scan_report.py      scan + PUT scan-report; failures warn, never fail the job
 tools/sync-skill.py regenerates the bundled skill copy
 ```
 
