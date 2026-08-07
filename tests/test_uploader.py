@@ -78,14 +78,14 @@ FAKE = FakeRequests()
 _saved = sys.modules.get("requests")
 sys.modules["requests"] = FAKE
 try:
-    from uploader import cli, inner_upload, scan_report  # noqa: E402
+    from uploader import cli, package_upload, scan_report  # noqa: E402
 finally:
     if _saved is None:
         sys.modules.pop("requests", None)
     else:
         sys.modules["requests"] = _saved
 
-assert inner_upload.requests is FAKE and scan_report.requests is FAKE
+assert package_upload.requests is FAKE and scan_report.requests is FAKE
 
 
 class UploaderTransportTest(unittest.TestCase):

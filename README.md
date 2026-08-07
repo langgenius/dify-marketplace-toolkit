@@ -106,7 +106,7 @@ validator/          the CLI surface
 uploader/           publishing pipeline -- run it: python3 .scripts/uploader
   __main__.py         entry point
   cli.py              argparse and the upload -> scan report flow
-  inner_upload.py     POST /plugins/inner-upload; failures raise
+  package_upload.py   POST /plugins/inner-upload; failures raise
   scan_report.py      scan + PUT /plugin-artifacts/{checksum}/scan-report; failures warn
   upload-package.py   deprecated alias for workflows not yet migrated
 tools/sync-skill.py regenerates the bundled skill copy
