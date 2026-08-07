@@ -126,15 +126,19 @@ can be promoted from warning to blocking without a file move.
 3. Add a row to `CHECKS` in `toolkit/registry.py`.
 4. `make check`.
 
-## Security report attached to uploads
+## Scan report submitted after upload
 
-`uploader/upload-package.py` scans the packaged artifact and sends the result
-to Marketplace as an extra `security_report` form field alongside the package.
-It is what fills the "Access Domain" and "Security" blocks on the plugin page.
+`uploader/upload-package.py` publishes in two calls: the package is uploaded
+first, then the packaged artifact is scanned and the result is submitted to
+`PUT /api/v1/plugin-artifacts/{checksum}/scan-report`, addressed by the
+checksum the upload response returned. It is what fills the "Access Domain"
+and "Security" blocks on the plugin page.
 
 The scan runs in `--test` mode too, so a pre-check run prints exactly what the
-plugin page will say without uploading anything. A scan that fails for any
-reason is reported inside the payload and never blocks publishing. Pass
+plugin page will say without uploading anything. Because the package is
+already live when the report travels, a scan or submission failure can only
+cost the page its scan data: it prints a `::warning::` annotation and never
+fails the job. Server errors and timeouts are retried, a 4xx is not. Pass
 `--no-vuln-scan` to collect dependencies without querying the vulnerability
 database.
 

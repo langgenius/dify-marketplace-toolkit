@@ -2,14 +2,14 @@
 
 This script is the only toolkit entry point that every publish path already
 calls: both plugin repositories invoke it from their pre-check and their
-merge workflow. That makes it the one place where a static security scan can
-be attached without editing a single workflow file — which is why the scan
-lives here rather than as a new CI step.
+merge workflow. That makes it the one place where the publish flow can carry
+a static security scan without editing a single workflow file.
 
-The scan result travels with the package as one extra multipart field. It is
-strictly additive: an older Marketplace ignores the field, and a scan that
-fails for any reason is reported inside the payload rather than raised.
-**Publishing a plugin must never fail because a scanner did.**
+Publishing takes two calls. The upload happens first and alone decides
+success; the packaged artifact is then scanned and the report is submitted
+against the checksum the upload response assigned to it. A report that fails
+to build or to arrive only costs the plugin page its scan data until a
+rescan. **Publishing a plugin must never fail because a scanner did.**
 """
 
 import argparse
@@ -20,6 +20,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import traceback
 from pathlib import Path
 
@@ -36,6 +37,14 @@ MARKETPLACE_BASE_URL = ""
 PLUGIN_DAEMON_PATH = "./dify-plugin"
 TESTING = False
 SCAN_VULNERABILITIES = True
+
+SCAN_REPORT_SCHEMA_VERSION = 1
+SCAN_REPORT_PRODUCER = "ci"
+SCAN_REPORT_ATTEMPTS = 3
+# (connect, read). The upload read timeout is generous because packages can be
+# large; the report is a small JSON body and must not hang a workflow.
+UPLOAD_TIMEOUT = (5, 300)
+SCAN_REPORT_TIMEOUT = (5, 30)
 
 
 def main():
@@ -90,16 +99,32 @@ def main():
         print("No package or directory provided")
 
 
-def build_security_report(package: str) -> str:
-    """Scan the packaged artifact and serialise the Marketplace payload.
+def utc_now() -> str:
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def warn(message: str):
+    # GitHub Actions renders `::warning::` as an annotation; locally it is a
+    # prefixed line. Either way the failure is visible without being able to
+    # fail the job.
+    print(f"::warning::{message}")
+
+
+def build_security_report(package: str):
+    """Scan the packaged artifact and return the report payload, or None.
 
     The *package* is scanned rather than the source directory so the report
     describes exactly what gets published. It matters for the official plugin
     repository, whose ``requirements.txt`` is generated during packaging and
     does not exist in the source tree.
 
-    Any failure degrades to an empty string: the upload proceeds without the
-    field, exactly as it did before this existed.
+    Any failure degrades to ``None``: the publish proceeds without a report,
+    exactly as it did before the scanner existed.
     """
     workdir = None
     try:
@@ -109,10 +134,7 @@ def build_security_report(package: str) -> str:
         unpack_package(Path(package), unpacked)
         report = security_scan.build_security_report(
             unpacked,
-            scanned_at=datetime.datetime.now(datetime.timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
+            scanned_at=utc_now(),
             vulnerability_lookup=osv.make_lookup(enabled=SCAN_VULNERABILITIES),
             # Range inference queries PyPI, so it obeys the same switch as the
             # vulnerability lookup: --no-vuln-scan keeps the scan fully offline,
@@ -121,11 +143,11 @@ def build_security_report(package: str) -> str:
             version_resolver=pypi.make_resolver(enabled=SCAN_VULNERABILITIES),
         )
         print(f"Security scan: {summarize_report(report)}")
-        return security_scan.dumps_report(report)
+        return report
     except Exception:
-        print("Security scan failed; uploading without a security report")
+        print("Security scan failed")
         print(traceback.format_exc())
-        return ""
+        return None
     finally:
         if workdir:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -147,25 +169,31 @@ def summarize_report(report: dict) -> str:
 
 
 def upload_package(package: str, token: str, base_url: str, force: bool, changelog: str):
-    global TESTING
-
-    # Deliberately before the testing guard: the pre-check workflows run this
-    # script with --test, and that is where an author should first see what
-    # the plugin page will say about their package.
-    security_report = build_security_report(package)
-
     if TESTING:
+        # A pre-check run is where an author first sees what the plugin page
+        # will say, so the scan still runs — there is just nothing published
+        # and therefore no checksum to submit a report against.
+        build_security_report(package)
         print("!!! Skip uploading package in testing")
         return
 
+    checksum = post_package(package, token, base_url, force, changelog)
+    submit_scan_report(package, checksum, token, base_url)
+
+
+def post_package(package: str, token: str, base_url: str, force: bool, changelog: str) -> str:
+    """Upload the package; return the checksum Marketplace assigned to it.
+
+    Upload failures raise: unlike the scan report, a failed publish must be
+    loud. The checksum comes from the response because the signed artifact is
+    rebuilt server-side — the local bytes cannot predict it.
+    """
     url = f"{base_url}/api/v1/plugins/inner-upload"
 
     payload = {
         "changelog": changelog,
         "forcely": 'true' if force else 'false',
     }
-    if security_report:
-        payload["security_report"] = security_report
 
     files = [
         ("file", (package, open(package, "rb"), "application/octet-stream"))
@@ -175,10 +203,69 @@ def upload_package(package: str, token: str, base_url: str, force: bool, changel
         "Authorization": f"Bearer {token}"
     }
 
-    resp = requests.post(url, headers=headers, data=payload, files=files)
-    print(resp.json())
-    if resp.status_code != 200 or resp.json().get("code") != 0:
-        raise Exception(f"Failed to upload package: {resp.json()}")
+    resp = requests.post(url, headers=headers, data=payload, files=files, timeout=UPLOAD_TIMEOUT)
+    body = resp.json()
+    print(body)
+    if resp.status_code != 200 or body.get("code") != 0:
+        raise Exception(f"Failed to upload package: {body}")
+
+    version = (body.get("data") or {}).get("version") or {}
+    return str(version.get("checksum") or "")
+
+
+def submit_scan_report(package: str, checksum: str, token: str, base_url: str):
+    """Scan the artifact and submit the result against its checksum.
+
+    Nothing here may fail the job: the package is already published, so a
+    lost report only costs the plugin page its scan data until a rescan —
+    while a red merge workflow invites a re-run, and a re-run uploads the
+    package again. Server errors and timeouts are retried; a 4xx is a
+    contract disagreement a retry cannot fix.
+    """
+    try:
+        if not checksum:
+            warn("upload response carried no artifact checksum; scan report not submitted")
+            return
+
+        report = build_security_report(package)
+        if report is None:
+            warn("security scan failed; scan report not submitted")
+            return
+
+        body = {
+            "schema_version": SCAN_REPORT_SCHEMA_VERSION,
+            "producer": SCAN_REPORT_PRODUCER,
+            "produced_at": utc_now(),
+            **report,
+        }
+        url = f"{base_url}/api/v1/plugin-artifacts/{checksum}/scan-report"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        failure = ""
+        for attempt in range(SCAN_REPORT_ATTEMPTS):
+            if attempt:
+                time.sleep(2 ** attempt)
+            try:
+                resp = requests.put(url, headers=headers, json=body, timeout=SCAN_REPORT_TIMEOUT)
+            except requests.RequestException as error:
+                failure = f"scan report submission failed: {error}"
+                continue
+            if resp.status_code >= 500:
+                failure = f"scan report submission failed: HTTP {resp.status_code}"
+                continue
+            if resp.status_code != 200:
+                warn(f"scan report rejected with HTTP {resp.status_code}: {resp.text[:200]}")
+                return
+            try:
+                result = resp.json().get("data")
+            except ValueError:
+                result = None
+            print(f"Scan report submitted: {result}")
+            return
+        warn(failure)
+    except Exception:
+        warn("scan report submission crashed; the publish is unaffected")
+        print(traceback.format_exc())
 
 
 def upload_directory(directory: str, token: str, base_url: str, force: bool, changelog: str):
