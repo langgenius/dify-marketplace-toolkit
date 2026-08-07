@@ -1,4 +1,4 @@
-"""Build the security scan report for a packaged plugin and submit it.
+"""Build and submit the scan report: ``PUT /api/v1/plugin-artifacts/{checksum}/scan-report``.
 
 The report is addressed by the artifact checksum the upload returned and
 travels as its own call after the package is published. Nothing in here may

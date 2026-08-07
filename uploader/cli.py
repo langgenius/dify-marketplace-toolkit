@@ -1,14 +1,14 @@
 """Command line surface for publishing plugins to the Marketplace.
 
 Publishing takes two calls. The upload happens first and alone decides
-success (``package_upload``); the packaged artifact is then scanned and the
+success (``inner_upload``); the packaged artifact is then scanned and the
 report is submitted against the checksum the upload response assigned to it
 (``scan_report``). A report that fails to build or to arrive only costs the
 plugin page its scan data until a rescan. **Publishing a plugin must never
 fail because a scanner did.**
 
 Both plugin repositories invoke this from their pre-check (``--test``) and
-merge workflows through ``uploader/upload-package.py``.
+merge workflows by running the package directory: ``python3 .scripts/uploader``.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import subprocess
 import sys
 import traceback
 
-from uploader import package_upload, scan_report
+from uploader import inner_upload, scan_report
 
 
 @dataclasses.dataclass
@@ -93,7 +93,7 @@ def upload_package(package: str, options: Options):
         print("!!! Skip uploading package in testing")
         return
 
-    checksum = package_upload.upload(package, options.token, options.base_url, options.force, options.changelog)
+    checksum = inner_upload.upload(package, options.token, options.base_url, options.force, options.changelog)
     scan_report.submit(package, checksum, options.token, options.base_url, options.scan_vulnerabilities)
 
 

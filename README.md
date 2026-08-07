@@ -103,22 +103,25 @@ toolkit/            importable core -- no argparse, no sys.exit, unit-tested
 validator/          the CLI surface
   validate-difypkg.py   main entry point
   bin/                  one six-line adapter per check
-uploader/           publishing pipeline, called by both plugin repositories
-  upload-package.py   frozen workflow entry point -- a stub over cli.py
+uploader/           publishing pipeline -- run it: python3 .scripts/uploader
+  __main__.py         entry point
   cli.py              argparse and the upload -> scan report flow
-  package_upload.py   POST inner-upload; failures raise
-  scan_report.py      scan + PUT scan-report; failures warn, never fail the job
+  inner_upload.py     POST /plugins/inner-upload; failures raise
+  scan_report.py      scan + PUT /plugin-artifacts/{checksum}/scan-report; failures warn
+  upload-package.py   deprecated alias for workflows not yet migrated
 tools/sync-skill.py regenerates the bundled skill copy
 ```
 
 Two rules keep this stable:
 
-**Paths other repositories call are frozen.** `validator/check-pkg-paths.py`,
-`validator/test-plugin-install.py` and `uploader/upload-package.py` are
-hardcoded in `dify-plugins` and `dify-official-plugins` workflows, which clone
-this repository at `HEAD` with no pinned SHA. Moving one breaks every open
-plugin PR in both repositories the moment it merges. They stay at the top level
-for that reason; everything behind them is free to move.
+**Paths other repositories call are frozen until migrated.** `validator/check-pkg-paths.py`,
+`validator/test-plugin-install.py` and the uploader entry are hardcoded in
+`dify-plugins` and `dify-official-plugins` workflows, which clone this
+repository at `HEAD` with no pinned SHA — moving one breaks every open plugin
+PR in both repositories the moment it merges. The canonical uploader
+invocation is the package directory itself, `python3 .scripts/uploader`;
+`uploader/upload-package.py` stays as an alias until both repositories call
+the package directly, then it goes.
 
 **Category and severity live in `registry.py`, not in directory names.** A check
 can be promoted from warning to blocking without a file move.

@@ -78,14 +78,14 @@ FAKE = FakeRequests()
 _saved = sys.modules.get("requests")
 sys.modules["requests"] = FAKE
 try:
-    from uploader import cli, package_upload, scan_report  # noqa: E402
+    from uploader import cli, inner_upload, scan_report  # noqa: E402
 finally:
     if _saved is None:
         sys.modules.pop("requests", None)
     else:
         sys.modules["requests"] = _saved
 
-assert package_upload.requests is FAKE and scan_report.requests is FAKE
+assert inner_upload.requests is FAKE and scan_report.requests is FAKE
 
 
 class UploaderTransportTest(unittest.TestCase):
@@ -212,7 +212,7 @@ class UploaderTransportTest(unittest.TestCase):
     def test_cli_flags_reach_the_options(self):
         """The workflow-facing flags stay wired to the behaviour they name."""
         captured = {}
-        argv = ["upload-package.py", "-p", self.package, "-t", "tok", "-u", "https://mp", "-f", "--test", "--no-vuln-scan"]
+        argv = ["uploader", "-p", self.package, "-t", "tok", "-u", "https://mp", "-f", "--test", "--no-vuln-scan"]
         with mock.patch.object(cli, "upload_package", lambda pkg, opts: captured.update(package=pkg, options=opts)):
             with mock.patch.object(sys, "argv", argv):
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -224,13 +224,17 @@ class UploaderTransportTest(unittest.TestCase):
         self.assertTrue(options.force)
         self.assertEqual(options.base_url, "https://mp")
 
-    def test_entry_point_stub_wires_the_cli(self):
-        """Both plugin repositories call this exact path; it must keep working."""
-        stub = Path(__file__).resolve().parents[1] / "uploader" / "upload-package.py"
-        spec = importlib.util.spec_from_file_location("uploader_entry_stub", stub)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.assertIs(module.main, cli.main)
+    def test_entry_points_wire_the_cli(self):
+        """`python3 .scripts/uploader` is the canonical invocation; the old
+        `upload-package.py` path stays as an alias until both plugin
+        repositories migrate. Each must reach the same CLI."""
+        for entry in ("__main__.py", "upload-package.py"):
+            with self.subTest(entry=entry):
+                path = Path(__file__).resolve().parents[1] / "uploader" / entry
+                spec = importlib.util.spec_from_file_location("uploader_entry_probe", path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self.assertIs(module.main, cli.main)
 
 
 if __name__ == "__main__":

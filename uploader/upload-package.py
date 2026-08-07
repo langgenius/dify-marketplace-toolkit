@@ -1,8 +1,8 @@
-"""Publishing entry point; the logic lives in the ``uploader`` package.
+"""Deprecated alias for ``python3 path/to/uploader``.
 
-Both plugin repositories call this exact path from their pre-check and merge
-workflows, so the file stays put as a thin stub — the same pattern as the
-``validator/bin`` adapters. See ``uploader/cli.py``.
+The plugin repositories' workflows still call this exact path; it forwards
+to the same CLI and disappears once both of them invoke the package
+directory instead.
 """
 
 import sys

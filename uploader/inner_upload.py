@@ -1,4 +1,4 @@
-"""Upload a packaged plugin to the Marketplace.
+"""Upload a packaged plugin: ``POST /api/v1/plugins/inner-upload``.
 
 This is the one call in the publish flow that must be loud: a failed publish
 raises. The scan report is the opposite by contract — see ``scan_report``.
