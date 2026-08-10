@@ -51,8 +51,15 @@ itself:
 - Python compile check
 - Python safety warnings
 - prohibited financial activity review warnings
+- outbound access domains, and whether they match the optional
+  `network.domains` node in `manifest.yaml`
+- dependency vulnerabilities, looked up in the OSV database
 - optional sensitive capability disclosure check when `--pr-body-file` is
   provided
+
+The dependency vulnerability check is the only one that reaches the network.
+Pass `--offline` to skip it; the run then reports the dependency set without a
+verdict rather than reporting a clean one.
 
 The local validator does not cover checks that require PR or Marketplace
 context, such as PR title/body language, PR template completeness, duplicate
@@ -75,6 +82,94 @@ command fail.
 If `--output-dir` is not provided, reports are written to a temporary directory
 that is cleaned up when the command exits. Use `--keep-temp` only when you also
 want to keep the unpacked package directory for debugging.
+
+### Tests
+
+```bash
+make test     # offline unit tests
+make check    # what CI runs: tests, stub wiring, skill sync
+```
+
+## Repository layout
+
+```text
+toolkit/            importable core -- no argparse, no sys.exit, unit-tested
+  findings.py         the value every check returns
+  cli.py              the one CLI shell all check scripts share
+  registry.py         what the local validator runs, in what order
+  walk.py  osv.py     shared file walk; OSV vulnerability client
+  scan/               extracts facts: hosts, deps, capabilities, report
+  checks/             turns those facts into errors and warnings
+validator/          the CLI surface
+  validate-difypkg.py   main entry point
+  check-*.py            one six-line adapter per check -- paths other repos call
+uploader/           publishing pipeline -- run it: python3 .scripts/uploader
+  __main__.py         entry point
+  cli.py              argparse and the upload -> scan report flow
+  package_upload.py   POST /plugins/inner-upload; failures raise
+  scan_report.py      scan + PUT /plugin-artifacts/{checksum}/scan-report; failures warn
+  upload-package.py   deprecated alias for workflows not yet migrated
+tools/sync-skill.py regenerates the bundled skill copy
+```
+
+Two rules keep this stable:
+
+**Paths other repositories call are frozen until migrated.** `validator/check-pkg-paths.py`,
+`validator/test-plugin-install.py` and the uploader entry are hardcoded in
+`dify-plugins` and `dify-official-plugins` workflows, which clone this
+repository at `HEAD` with no pinned SHA — moving one breaks every open plugin
+PR in both repositories the moment it merges. The canonical uploader
+invocation is the package directory itself, `python3 .scripts/uploader`;
+`uploader/upload-package.py` stays as an alias until both repositories call
+the package directly, then it goes.
+
+**Category and severity live in `registry.py`, not in directory names.** A check
+can be promoted from warning to blocking without a file move.
+
+### Adding a check
+
+1. Write `toolkit/checks/<name>.py` exposing `scan(args) -> Findings`.
+2. Add a six-line adapter `validator/check-<name>.py`, copying any existing one.
+3. Add a row to `CHECKS` in `toolkit/registry.py`.
+4. `make check`.
+
+## Scan report submitted after upload
+
+`uploader/upload-package.py` publishes in two calls: the package is uploaded
+first, then the packaged artifact is scanned and the result is submitted to
+`PUT /api/v1/plugin-artifacts/{checksum}/scan-report`, addressed by the
+checksum the upload response returned. It is what fills the "Access Domain"
+and "Security" blocks on the plugin page.
+
+The scan runs in `--test` mode too, so a pre-check run prints exactly what the
+plugin page will say without uploading anything. Because the package is
+already live when the report travels, a scan or submission failure can only
+cost the page its scan data: it prints a `::warning::` annotation and never
+fails the job. Server errors and timeouts are retried, a 4xx is not. Pass
+`--no-vuln-scan` to collect dependencies without querying the vulnerability
+database.
+
+### Declaring outbound domains
+
+A plugin may declare the domains it contacts in `manifest.yaml`:
+
+```yaml
+network:
+  domains:
+    - api.example-vendor.com
+    - "*.cdn.example-vendor.com"
+```
+
+The node is optional and additive — every existing consumer ignores unknown
+top-level manifest keys. It exists because static analysis can only read
+hostnames that appear literally in the source: a URL assembled at runtime or
+held inside a vendor SDK is invisible to the scanner, and across the current
+plugin corpus that is the majority of outbound call sites. Declaring the
+domains is how those become visible to users.
+
+The check compares in one direction only. A domain the scan finds but the
+manifest omits is reported. A domain the manifest declares but the scan cannot
+find is accepted without comment — that gap is the reason the field exists.
 
 ## Codex / Claude Code skill
 

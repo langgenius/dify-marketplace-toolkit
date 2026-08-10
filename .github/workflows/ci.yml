@@ -1,0 +1,62 @@
+name: CI
+
+# This repository had no CI of its own, while two plugin repositories clone it at
+# HEAD with no pinned SHA -- a bad commit here reaches every open plugin PR in
+# both of them immediately. These gates are the minimum that makes that
+# arrangement safe. The steps call the Makefile so the definitions live once.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the interpreter both plugin repositories run the toolkit on.
+          python-version: '3.12'
+
+      - name: Unit tests
+        run: make test
+
+      - name: Check stubs load
+        run: make stubs
+
+      # The skill ships a copy of the validator. Editing one tree and not the
+      # other used to ship a stale skill silently.
+      - name: Skill copy is in sync
+        run: python3 tools/sync-skill.py --check
+
+      # Every path below is hardcoded in dify-plugins and dify-official-plugins
+      # workflows, which clone this repository at HEAD. Moving any of them
+      # breaks every open plugin PR in both repositories the moment it merges.
+      # The per-check paths come from the registry -- the same table the
+      # workflows' check steps were generated from.
+      - name: Public CLI paths still exist
+        run: |
+          set -e
+          test -f validator/check-pkg-paths.py
+          test -f validator/test-plugin-install.py
+          test -f validator/validate-difypkg.py
+          test -f uploader/__main__.py
+          test -f uploader/upload-package.py
+          python3 -c '
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".")
+          from toolkit.registry import CHECKS
+          scripts = [c.script for c in CHECKS if c.script]
+          missing = [s for s in scripts if not Path("validator", s).is_file()]
+          if missing:
+              raise SystemExit(f"missing public check paths: {missing}")
+          print(f"{len(scripts)} registry check paths intact")
+          '
+          echo "public CLI paths intact"
