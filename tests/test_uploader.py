@@ -16,6 +16,7 @@ where requests is not installed.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import importlib.util
 import io
@@ -88,7 +89,9 @@ finally:
 assert package_upload.requests is FAKE and scan_report.requests is FAKE
 
 
-class UploaderTransportTest(unittest.TestCase):
+class PublishFixture(unittest.TestCase):
+    """Shared fixture: a fake ``requests``, a canned scan, a throwaway package."""
+
     def setUp(self):
         FAKE.reset()
         # The scanner has its own suite; these tests pin the transport, so the
@@ -128,6 +131,11 @@ class UploaderTransportTest(unittest.TestCase):
     def puts(self):
         return [call for call in FAKE.calls if call[0] == "put"]
 
+    def posts(self):
+        return [call for call in FAKE.calls if call[0] == "post"]
+
+
+class UploaderTransportTest(PublishFixture):
     def test_upload_carries_no_security_report_field(self):
         """The form field the Marketplace no longer reads must be gone."""
         FAKE.post_queue = [FakeResponse(body=UPLOAD_OK)]
@@ -247,6 +255,122 @@ class UploaderTransportTest(unittest.TestCase):
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
                 self.assertIs(module.main, cli.main)
+
+
+class MirrorFanOutTest(PublishFixture):
+    """A publish that fans out to a second deployment.
+
+    The mirror exists so a merged plugin also lands on staging, which is what
+    makes the upload-signal-driven scheduler tasks (`sync_latest_plugins` and
+    friends) testable there at all. It must never be able to hold the primary
+    publish back.
+    """
+
+    MIRROR = (cli.Target(base_url="https://stg", token="stg-tok"),)
+    MIRROR_UPLOAD_OK = {"code": 0, "data": {"version": {"version": "0.0.1", "checksum": "def456"}}}
+
+    def test_each_target_gets_its_own_upload_and_report(self):
+        """The mirror re-signs the artifact, so its report must address the
+        checksum the mirror returned — not production's."""
+        FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(body=self.MIRROR_UPLOAD_OK)]
+        FAKE.put_queue = [FakeResponse(body=REPORT_OK), FakeResponse(body=REPORT_OK)]
+        out = self.publish(mirrors=self.MIRROR)
+
+        primary_upload, mirror_upload = self.posts()
+        self.assertTrue(primary_upload[1].startswith("https://mp/"), primary_upload[1])
+        self.assertTrue(mirror_upload[1].startswith("https://stg/"), mirror_upload[1])
+        self.assertEqual(mirror_upload[2]["headers"]["Authorization"], "Bearer stg-tok")
+
+        primary_report, mirror_report = self.puts()
+        self.assertTrue(primary_report[1].endswith("/plugin-artifacts/abc123/scan-report"))
+        self.assertTrue(mirror_report[1].endswith("/plugin-artifacts/def456/scan-report"))
+        self.assertEqual(mirror_report[2]["headers"]["Authorization"], "Bearer stg-tok")
+        self.assertNotIn("::warning::", out)
+
+    def test_scan_is_built_once_for_every_target(self):
+        """Resolving dependencies and querying OSV/PyPI per target would make
+        every merge several minutes slower for an identical answer."""
+        built = []
+        with mock.patch.object(scan_report, "build", lambda package, scan_vulnerabilities=True: built.append(package) or {"scanner_version": "test"}):
+            FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(body=self.MIRROR_UPLOAD_OK)]
+            FAKE.put_queue = [FakeResponse(body=REPORT_OK), FakeResponse(body=REPORT_OK)]
+            self.publish(mirrors=self.MIRROR)
+        self.assertEqual(built, [self.package])
+
+    def test_mirror_upload_failure_cannot_fail_the_publish(self):
+        """Staging being down is not a reason to fail a production release."""
+        FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(status_code=503, body={"code": -1})]
+        FAKE.put_queue = [FakeResponse(body=REPORT_OK)]
+        out = self.publish(mirrors=self.MIRROR)  # must not raise
+        self.assertEqual(len(self.puts()), 1)  # only production's report travelled
+        self.assertIn("::warning::", out)
+        self.assertIn("https://stg", out)
+
+    def test_primary_failure_skips_the_mirror_entirely(self):
+        """A package production rejects has no business reaching staging."""
+        FAKE.post_queue = [FakeResponse(status_code=500, body={"code": -1})]
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(Exception):
+                cli.publish_package(self.package, self.options(mirrors=self.MIRROR))
+        self.assertEqual(len(self.posts()), 1)
+        self.assertEqual(self.puts(), [])
+
+    def test_mirror_upload_is_always_forced(self):
+        """A 409 from a version some backfill already put on staging would hide
+        whether the pipeline reached it."""
+        FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(body=self.MIRROR_UPLOAD_OK)]
+        FAKE.put_queue = [FakeResponse(body=REPORT_OK), FakeResponse(body=REPORT_OK)]
+        self.publish(mirrors=self.MIRROR, force=False)
+        primary_upload, mirror_upload = self.posts()
+        self.assertEqual(primary_upload[2]["data"]["forcely"], "false")
+        self.assertEqual(mirror_upload[2]["data"]["forcely"], "true")
+
+    def test_testing_mode_never_touches_a_mirror(self):
+        with mock.patch.object(scan_report, "build", lambda package, scan_vulnerabilities=True: {}):
+            self.publish(testing=True, mirrors=self.MIRROR)
+        self.assertEqual(FAKE.calls, [])
+
+
+class MirrorArgumentTest(unittest.TestCase):
+    """``--mirror-url`` / ``--mirror-token`` pairing.
+
+    The workflows pass both unconditionally from repository secrets, so the
+    unset case has to be a no-op rather than a parse error — that is what lets
+    the workflow change merge before anyone with admin has added the secret.
+    """
+
+    def parse(self, urls, tokens):
+        parser = argparse.ArgumentParser()
+        return cli.parse_mirrors(parser, urls, tokens)
+
+    def test_unset_secret_means_no_mirror(self):
+        self.assertEqual(self.parse([""], [""]), ())
+        self.assertEqual(self.parse([], []), ())
+
+    def test_url_and_token_pair_positionally(self):
+        got = self.parse(["https://stg/", "https://dev"], ["a", "b"])
+        self.assertEqual(got, (cli.Target("https://stg", "a"), cli.Target("https://dev", "b")))
+
+    def test_a_url_without_a_token_is_rejected(self):
+        """Otherwise the misconfiguration shows up as a 401 per plugin."""
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parse(["https://stg"], [""])
+
+    def test_unbalanced_flags_are_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parse(["https://stg"], [])
+
+    def test_cli_flags_reach_the_options(self):
+        captured = {}
+        argv = ["uploader", "-p", "pkg.difypkg", "-t", "tok", "-u", "https://mp",
+                "--mirror-url", "https://stg", "--mirror-token", "stg-tok"]
+        with mock.patch.object(cli, "publish_package", lambda pkg, opts: captured.update(options=opts)):
+            with mock.patch.object(sys, "argv", argv):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cli.main()
+        self.assertEqual(captured["options"].mirrors, (cli.Target("https://stg", "stg-tok"),))
 
 
 if __name__ == "__main__":

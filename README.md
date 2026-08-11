@@ -171,6 +171,33 @@ The check compares in one direction only. A domain the scan finds but the
 manifest omits is reported. A domain the manifest declares but the scan cannot
 find is accepted without comment — that gap is the reason the field exists.
 
+## Publishing to more than one deployment
+
+`--mirror-url URL --mirror-token TOKEN` (repeatable, paired positionally) sends
+the same publish to a second Marketplace after the primary one succeeds. Its
+purpose is staging: several backend scheduler tasks — `sync_latest_plugins` and
+the rest of the upload-signal-driven set — only run when a new upload signals
+them, so a staging deployment that never receives an upload cannot exercise
+them at all.
+
+Three properties make it safe to point production CI at staging:
+
+* **A mirror cannot fail a publish.** The primary target uploads first and is
+  the only one that raises; a mirror failure prints a `::warning::`, exactly
+  like the scan report. A primary failure skips the mirrors entirely — a
+  package production rejects has no business reaching staging.
+* **The scan is built once.** It describes the local package bytes, so it is
+  target-independent; building it per target would repeat dependency
+  resolution and the OSV/PyPI queries for an identical answer.
+* **Each target's report addresses its own checksum.** Every deployment
+  re-signs the artifact with its own key, so the checksums differ, and a report
+  is only ever submitted against the checksum that target returned.
+
+A mirror upload is always forced, regardless of `-f`: a 409 from a version some
+backfill already put there would hide whether the pipeline reached it. An empty
+`--mirror-url` drops its pair, so a workflow can pass an unset repository secret
+and simply get no mirror.
+
 ## Codex / Claude Code skill
 
 The self-contained skill is available at:
