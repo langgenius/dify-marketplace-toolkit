@@ -100,16 +100,19 @@ def summarize(report: dict) -> str:
     )
 
 
-def submit(package: str, checksum: str, token: str, base_url: str, scan_vulnerabilities: bool = True):
-    """Scan the artifact and submit the result against its checksum."""
-    try:
-        if not checksum:
-            warn("upload response carried no artifact checksum; scan report not submitted")
-            return
+def post(report, checksum: str, token: str, base_url: str):
+    """Submit an already-built report against one target's checksum.
 
-        report = build(package, scan_vulnerabilities)
+    Building and posting are separate because a publish may fan out to several
+    deployments: the report describes the local package bytes and is built once,
+    while every deployment re-signs the artifact and so addresses it by a
+    checksum of its own.
+    """
+    try:
         if report is None:
-            warn("security scan failed; scan report not submitted")
+            return  # build() already reported why; nothing to submit anywhere
+        if not checksum:
+            warn(f"{base_url} returned no artifact checksum; scan report not submitted")
             return
 
         body = {
