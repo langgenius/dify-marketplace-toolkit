@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 from toolkit.findings import Findings
+from toolkit.checks.source_hosts import SOURCE_REPOSITORY_URL_RE, unsupported_repo_error
 
 REQUIRED_FIELDS = {
     "author": ".author",
@@ -74,10 +75,6 @@ PRIVACY_DISCLOSURE_KEYWORDS = (
 )
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
-SOURCE_REPOSITORY_RE = re.compile(
-    r"^https?://(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org|gitee\.com|codeberg\.org|git\.sr\.ht)/[^\s)>\"]+$",
-    re.IGNORECASE,
-)
 
 
 def yq_value(manifest_path: Path, expression: str) -> str:
@@ -172,8 +169,8 @@ def validate_manifest(directory: Path) -> tuple[list[str], list[str]]:
         errors.append("type must be 'plugin'")
 
     repo = values.get("repo", "")
-    if repo and not SOURCE_REPOSITORY_RE.search(repo):
-        errors.append("repo must be a supported source repository URL")
+    if repo and not SOURCE_REPOSITORY_URL_RE.search(repo):
+        errors.append(unsupported_repo_error(repo))
 
     contact = values.get("contact", "")
     if contact and not EMAIL_RE.match(contact):
