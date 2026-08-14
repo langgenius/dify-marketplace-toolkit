@@ -19,11 +19,12 @@ import re
 from pathlib import Path
 
 from toolkit.findings import Findings
-
-SOURCE_REPOSITORY_RE = re.compile(
-    r"https?://(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org|gitee\.com|codeberg\.org|git\.sr\.ht)/[^\s)>\"]+",
-    re.IGNORECASE,
+from toolkit.checks.source_hosts import (
+    ADDITION_HINT,
+    SOURCE_REPOSITORY_LINK_RE,
+    allowed_hosts_display,
 )
+
 
 REQUIRED_SECTIONS = {
     "setup instructions": (
@@ -102,8 +103,11 @@ def validate_readme(directory: Path) -> tuple[list[str], list[str]]:
     if content is None or read_errors:
         return errors, warnings
 
-    if not SOURCE_REPOSITORY_RE.search(content):
-        errors.append("README.md must include a source repository URL")
+    if not SOURCE_REPOSITORY_LINK_RE.search(content):
+        errors.append(
+            "README.md must include a source repository URL from an allowed host "
+            f"(allowed: {allowed_hosts_display()}); {ADDITION_HINT}"
+        )
 
     readable_content = CODE_BLOCK_RE.sub("", content)
     cjk_count = len(CJK_RE.findall(readable_content))

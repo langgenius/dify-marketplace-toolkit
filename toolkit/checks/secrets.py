@@ -4,10 +4,23 @@ Detection runs in two tiers because confidence differs. A vendor-shaped token
 -- ``sk-``, ``ghp_``, ``AKIA``, ``xox*``, a JWT, a PEM private-key header -- is
 self-identifying, so a match is an error outright. Generic
 ``password = "..."`` assignments are not: most of them are schema defaults,
-config templates and README snippets. Those go through the value heuristics
-below, and a short, templated, URL-shaped or path-shaped value is dropped. The
-placeholder list is what keeps that tier usable at all; without it every
-``api_key: <YOUR_KEY>`` in the docs would block a release.
+config templates, README snippets and ordinary code that *reads* a credential.
+The generic tier therefore only blocks when all of these hold:
+
+1. the right-hand side is a literal at all. In code files an unquoted RHS is
+   an expression -- ``api_key = credentials.get("api_key")`` is a plugin doing
+   its job, not a leak -- so it is skipped outright. In config files
+   (``.env``, YAML, ...) bare values are still literals.
+2. the value is token-shaped: secret material is drawn from hex or base64-ish
+   alphabets and never contains ``(`` or spaces.
+3. the value has the entropy of secret material. Thresholds follow
+   detect-secrets: 3.0 bits/char for hex, 4.5 for the wider alphabet. This
+   trades recall for precision on purpose -- a 24-char random token can land
+   below 4.5 -- because near-misses still surface as warnings and the vendor
+   tier catches every prefixed format regardless.
+
+Counts and flags (``max_tokens: 4096``) are never secrets and are dropped
+before either tier of the generic pass.
 
 Once a line matches a vendor pattern the generic pass is skipped for it,
 otherwise the same token reports twice under two names.
@@ -22,8 +35,10 @@ buys noise at real cost.
 
 from __future__ import annotations
 
+import math
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from toolkit.findings import Findings
@@ -112,9 +127,26 @@ ASSIGNMENT_RE = re.compile(
     r"""(?ix)
     (?P<key>[A-Z0-9_.-]*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|private[_-]?key|secret|token)[A-Z0-9_.-]*)
     \s*[:=]\s*
-    (?P<value>["']?[^"',\s#}]+["']?)
+    (?P<value>"[^"]*"|'[^']*'|[^"',\s#}]+)
     """
 )
+
+# Files where an unquoted right-hand side is code, not a literal value.
+CODE_SUFFIXES = {
+    ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx",
+    ".kt", ".m", ".mjs", ".mm", ".php", ".py", ".pyi", ".rb", ".rs",
+    ".scala", ".swift", ".ts", ".tsx",
+}
+
+# Values that are self-evidently not credentials regardless of their key.
+NON_SECRET_VALUES = {"true", "false", "yes", "no", "on", "off"}
+NUMERIC_VALUE_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+# Secret material alphabets, with detect-secrets' entropy floors per alphabet.
+HEX_VALUE_RE = re.compile(r"^[0-9a-fA-F]+$")
+TOKEN_VALUE_RE = re.compile(r"^[A-Za-z0-9+/=_.-]+$")
+MIN_HEX_ENTROPY = 3.0
+MIN_TOKEN_ENTROPY = 4.5
 OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")
 GITHUB_TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b")
 SLACK_TOKEN_RE = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
@@ -156,17 +188,30 @@ def is_placeholder(value: str) -> bool:
     return False
 
 
+def shannon_entropy(value: str) -> float:
+    if not value:
+        return 0.0
+    total = len(value)
+    return -sum(
+        (count / total) * math.log2(count / total)
+        for count in Counter(value).values()
+    )
+
+
 def looks_like_secret_value(value: str) -> bool:
+    """Does this literal have the shape and entropy of secret material?"""
     cleaned = clean_value(value)
-    if is_placeholder(cleaned):
-        return False
     if len(cleaned) < 12:
         return False
     if cleaned.startswith(("http://", "https://")):
         return False
     if cleaned.startswith(("./", "../", "/")):
         return False
-    return True
+    if HEX_VALUE_RE.match(cleaned):
+        return shannon_entropy(cleaned) >= MIN_HEX_ENTROPY
+    if TOKEN_VALUE_RE.match(cleaned):
+        return shannon_entropy(cleaned) >= MIN_TOKEN_ENTROPY
+    return False
 
 
 def mask_secret(value: str) -> str:
@@ -179,6 +224,7 @@ def mask_secret(value: str) -> str:
 def scan_text(rel_path: str, text: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+    code_file = Path(rel_path).suffix.lower() in CODE_SUFFIXES
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         if PRIVATE_KEY_RE.search(line):
@@ -206,9 +252,19 @@ def scan_text(rel_path: str, text: str) -> tuple[list[str], list[str]]:
             lowered_key = key.lower()
             if not any(keyword in lowered_key for keyword in SECRET_KEYWORDS):
                 continue
-            if looks_like_secret_value(value):
-                errors.append(f"{rel_path}:{line_number} matched secret assignment `{key}`: {mask_secret(value)}")
-            elif clean_value(value) and not is_placeholder(value):
+            quoted = len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]
+            cleaned = clean_value(value)
+            if not cleaned or is_placeholder(cleaned):
+                continue
+            if NUMERIC_VALUE_RE.match(cleaned) or cleaned.lower() in NON_SECRET_VALUES:
+                continue
+            if code_file and not quoted:
+                # An unquoted RHS in code is an expression: reading a
+                # credential, not embedding one.
+                continue
+            if looks_like_secret_value(cleaned):
+                errors.append(f"{rel_path}:{line_number} matched secret assignment `{key}`: {mask_secret(cleaned)}")
+            else:
                 warnings.append(f"{rel_path}:{line_number} review possible secret field `{key}`")
 
     return errors, warnings
