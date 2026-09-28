@@ -198,6 +198,15 @@ backfill already put there would hide whether the pipeline reached it. An empty
 `--mirror-url` drops its pair, so a workflow can pass an unset repository secret
 and simply get no mirror.
 
+## Category changes
+
+The Marketplace refuses an update that moves a plugin to another category
+(for example an endpoint-only `extension` that adds tools and becomes a
+`tool`). `--allow-category-change` lifts that for one upload, primary and
+mirrors alike. Moves to or from `trigger` stay refused. It is separate from
+`-f`, which only replaces an existing version: mirrors are always forced, and
+that must not quietly change categories too.
+
 ## Codex / Claude Code skill
 
 The self-contained skill is available at:
