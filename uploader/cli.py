@@ -55,6 +55,7 @@ class Options:
     scan_vulnerabilities: bool
     plugin_daemon_path: str
     mirrors: tuple[Target, ...] = ()
+    allow_category_change: bool = False
 
 
 def main():
@@ -67,6 +68,11 @@ def main():
     parser.add_argument("-t", "--token", type=str, help="The token to use for authentication; not needed with --test, which never talks to the Marketplace")
     parser.add_argument("-u", "--base-url", type=str, help="The base url to use for the request")
     parser.add_argument("-f", "--force", action="store_true", help="Force upload the package, ignore version check")
+    parser.add_argument(
+        "--allow-category-change",
+        action="store_true",
+        help="Let this version move the plugin to another category (the Marketplace still refuses moves to or from trigger)",
+    )
     parser.add_argument("--with-changelog", action="store_true", help="Whether to read changelog from stdin")
     parser.add_argument("--plugin-daemon-path", type=str, help="The path to the plugin daemon")
     parser.add_argument("--test", action="store_true", help="Indicates that this is a testing")
@@ -114,6 +120,7 @@ def main():
         scan_vulnerabilities=not args.no_vuln_scan,
         plugin_daemon_path=args.plugin_daemon_path or "./dify-plugin",
         mirrors=parse_mirrors(parser, args.mirror_url, args.mirror_token),
+        allow_category_change=args.allow_category_change,
     )
 
     if args.package:
@@ -164,7 +171,9 @@ def publish_package(package: str, options: Options):
 
     # The primary target decides the exit code; it goes first so a package that
     # production rejects never reaches a mirror either.
-    checksum = package_upload.upload(package, options.token, options.base_url, options.force, options.changelog)
+    checksum = package_upload.upload(
+        package, options.token, options.base_url, options.force, options.changelog, options.allow_category_change
+    )
 
     # Built once: the report describes the package bytes, which are the same
     # everywhere, and building it means resolving dependencies and querying
@@ -187,7 +196,9 @@ def publish_to_mirror(package: str, report, mirror: Target, options: Options):
     would hide the answer rather than report it.
     """
     try:
-        checksum = package_upload.upload(package, mirror.token, mirror.base_url, True, options.changelog)
+        checksum = package_upload.upload(
+            package, mirror.token, mirror.base_url, True, options.changelog, options.allow_category_change
+        )
     except Exception:
         scan_report.warn(f"mirror publish to {mirror.base_url} failed; the primary publish is unaffected")
         print(traceback.format_exc())
