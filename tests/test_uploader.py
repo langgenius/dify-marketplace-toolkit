@@ -220,7 +220,7 @@ class UploaderTransportTest(PublishFixture):
     def test_cli_flags_reach_the_options(self):
         """The workflow-facing flags stay wired to the behaviour they name."""
         captured = {}
-        argv = ["uploader", "-p", self.package, "-t", "tok", "-u", "https://mp", "-f", "--test", "--no-vuln-scan"]
+        argv = ["uploader", "-p", self.package, "-t", "tok", "-u", "https://mp", "-f", "--test", "--no-vuln-scan", "--allow-category-change"]
         with mock.patch.object(cli, "publish_package", lambda pkg, opts: captured.update(package=pkg, options=opts)):
             with mock.patch.object(sys, "argv", argv):
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -230,6 +230,7 @@ class UploaderTransportTest(PublishFixture):
         self.assertTrue(options.testing)
         self.assertFalse(options.scan_vulnerabilities)
         self.assertTrue(options.force)
+        self.assertTrue(options.allow_category_change)
         self.assertEqual(options.base_url, "https://mp")
 
     def test_token_is_optional_only_in_test_mode(self):
@@ -324,6 +325,22 @@ class MirrorFanOutTest(PublishFixture):
         primary_upload, mirror_upload = self.posts()
         self.assertEqual(primary_upload[2]["data"]["forcely"], "false")
         self.assertEqual(mirror_upload[2]["data"]["forcely"], "true")
+
+    def test_category_change_is_opt_in_and_reaches_every_target(self):
+        """Without the flag the field is absent, so an older backend never sees
+        it; with it, staging must accept the same move production just did."""
+        FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(body=self.MIRROR_UPLOAD_OK)]
+        FAKE.put_queue = [FakeResponse(body=REPORT_OK), FakeResponse(body=REPORT_OK)]
+        self.publish(mirrors=self.MIRROR)
+        for upload in self.posts():
+            self.assertNotIn("allow_category_change", upload[2]["data"])
+
+        FAKE.reset()
+        FAKE.post_queue = [FakeResponse(body=UPLOAD_OK), FakeResponse(body=self.MIRROR_UPLOAD_OK)]
+        FAKE.put_queue = [FakeResponse(body=REPORT_OK), FakeResponse(body=REPORT_OK)]
+        self.publish(mirrors=self.MIRROR, allow_category_change=True)
+        for upload in self.posts():
+            self.assertEqual(upload[2]["data"]["allow_category_change"], "true")
 
     def test_testing_mode_never_touches_a_mirror(self):
         with mock.patch.object(scan_report, "build", lambda package, scan_vulnerabilities=True: {}):

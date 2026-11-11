@@ -12,7 +12,7 @@ import requests
 UPLOAD_TIMEOUT = (5, 300)
 
 
-def upload(package: str, token: str, base_url: str, force: bool, changelog: str) -> str:
+def upload(package: str, token: str, base_url: str, force: bool, changelog: str, allow_category_change: bool = False) -> str:
     """Upload the package; return the checksum Marketplace assigned to it.
 
     The checksum comes from the response because the signed artifact is
@@ -26,6 +26,9 @@ def upload(package: str, token: str, base_url: str, force: bool, changelog: str)
         "changelog": changelog,
         "forcely": 'true' if force else 'false',
     }
+    # Sent only on opt-in, so a backend that predates the field never sees it.
+    if allow_category_change:
+        payload["allow_category_change"] = 'true'
 
     headers = {
         "Authorization": f"Bearer {token}"
