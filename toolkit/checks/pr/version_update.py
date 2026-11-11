@@ -29,7 +29,7 @@ from toolkit.findings import Findings
 
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 CHECKBOX_RE = re.compile(r"^[ \t]*-[ \t]*\[(?P<checked>[ xX])\][ \t]*(?P<label>.+?)[ \t]*$", re.MULTILINE)
-VERSION_RE = re.compile(r"^\s*version\s*:\s*[\"']?([^\"'\n#]+)", re.MULTILINE)
+VERSION_LINE_RE = re.compile(r'^version\s*:\s*["\']?([^"\'\n#]+)')
 VERSION_TOKEN_RE = re.compile(r"(\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?)")
 
 
@@ -63,10 +63,22 @@ def manifest_version(directory: Path) -> str | None:
 
 
 def version_from_text(text: str) -> str | None:
-    match = VERSION_RE.search(text)
-    if not match:
-        return None
-    return match.group(1).strip()
+    """Return the top-level manifest ``version`` scalar.
+
+    Parsed with a narrow line reader rather than a YAML library: nested keys
+    such as ``meta.runner.version`` must not be mistaken for the release
+    version, regardless of key order.
+    """
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent != 0:
+            continue
+        match = VERSION_LINE_RE.match(line.strip())
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def version_from_package(path: Path) -> str | None:
