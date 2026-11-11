@@ -47,8 +47,13 @@ else:
     def _ct(f):
         return change_type(f)
 
-primaries = [f for f in files if _ct(f) in ('ADDED', 'MODIFIED')]
-removals = [f for f in files if _ct(f) in ('DELETED', 'REMOVED')]
+# A renamed or copied package lands at its new path in the head commit and is
+# the package to validate; its old path is covered by the rename itself.
+PRIMARY_TYPES = ('ADDED', 'MODIFIED', 'RENAMED', 'COPIED')
+REMOVAL_TYPES = ('DELETED', 'REMOVED')
+
+primaries = [f for f in files if _ct(f) in PRIMARY_TYPES]
+removals = [f for f in files if _ct(f) in REMOVAL_TYPES]
 
 if len(primaries) != 1:
     print('exactly one added or modified .difypkg is required in a single PR.', file=sys.stderr)
