@@ -47,7 +47,7 @@ itself:
   and required `PRIVACY.md`
 - README metadata, source repository URL, and English primary content
 - dependency policy, including no bare requirements, no git/direct URL installs,
-  and `dify-plugin >= 0.9.0`
+  and `dify-plugin >= 0.10.0`
 - Python compile check
 - Python safety warnings
 - prohibited financial activity review warnings
