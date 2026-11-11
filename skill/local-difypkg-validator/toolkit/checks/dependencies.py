@@ -9,8 +9,10 @@ use them legitimately, and a human can tell the two cases apart.
 Version constraints are graded rather than binary: no constraint at all blocks,
 because the next release of any transitive dependency becomes an unreviewed
 change; a lower bound alone only warns, since that is the common and mostly
-defensible style. ``dify-plugin`` is special-cased to a floor of 0.9.0, below
-which the SDK lacks capabilities the platform now assumes.
+defensible style. ``dify-plugin`` is special-cased to a floor of 0.10.0, below
+which the SDK lacks capabilities the platform now assumes -- 0.10 is the line
+the marketplace itself has moved to (0.11 is current, 0.10.2 is the most
+pinned), so 0.9 is the last generation worth accepting.
 
 ``LARGE_DEPENDENCIES`` is a judgement list, not a security list: those packages
 are hundreds of megabytes and dominate install time, so they get a human's
@@ -42,7 +44,8 @@ GIT_INSTALL_RE = re.compile(r"git\+", re.IGNORECASE)
 LOCAL_PATH_RE = re.compile(r"(^|\s@)\s*(?:\./|\.\./|/)")
 ONLY_LOWER_BOUND_RE = re.compile(r"^([^<>=!~]+)?(>=|>)\s*[^,]+$", re.IGNORECASE)
 PACKAGE_NAME_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)")
-MIN_DIFY_PLUGIN_VERSION = (0, 9, 0)
+MIN_DIFY_PLUGIN_VERSION = (0, 10, 0)
+MIN_DIFY_PLUGIN_TEXT = ".".join(str(part) for part in MIN_DIFY_PLUGIN_VERSION)
 
 LARGE_DEPENDENCIES = {
     "chromadb",
@@ -100,16 +103,31 @@ def package_name(requirement: str) -> str:
 
 
 def version_tuple(value: str) -> tuple[int, ...]:
+    """Parse the numeric head of a version, padded to three components.
+
+    ``0.10`` and ``0.10.0`` are the same release to a human and must compare
+    equal here; without the padding the shorter tuple sorts below every
+    three-component floor and ``dify-plugin>=0.10`` would be rejected by a
+    0.10.0 floor.
+    """
     parts = []
     for part in re.split(r"[.+-]", value):
         if not part.isdigit():
             break
         parts.append(int(part))
+    while len(parts) < 3:
+        parts.append(0)
     return tuple(parts)
 
 
+# Every operator that declares a minimum. ``~=`` is the one that matters most:
+# a compatible-release constraint such as ``~=0.10.0`` pins the 0.10 line, and
+# reading only ``>=``/``==`` used to reject it as "no lower bound found".
+LOWER_BOUND_RE = re.compile(r"(?:~=|>=|==|>)\s*([0-9][0-9A-Za-z.+-]*)")
+
+
 def dify_plugin_lower_bound(requirement: str) -> str | None:
-    match = re.search(r"(?:>=|==)\s*([0-9][0-9A-Za-z.+-]*)", requirement)
+    match = LOWER_BOUND_RE.search(requirement)
     if not match:
         return None
     return match.group(1)
@@ -159,7 +177,9 @@ def validate_requirement(requirement: str, source: str) -> tuple[list[str], list
     if name == "dify-plugin":
         lower_bound = dify_plugin_lower_bound(requirement)
         if lower_bound is None or version_tuple(lower_bound) < MIN_DIFY_PLUGIN_VERSION:
-            errors.append(f"{source}: dify_plugin dependency must be >= 0.9.0: {requirement}")
+            errors.append(
+                f"{source}: dify_plugin dependency must be >= {MIN_DIFY_PLUGIN_TEXT}: {requirement}"
+            )
             return errors, warnings
 
     if not VERSION_OPERATOR_RE.search(requirement):
